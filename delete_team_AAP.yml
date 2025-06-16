@@ -1,0 +1,123 @@
+---
+- name: delete team via template
+  hosts: localhost
+  gather_facts: no
+  connection: local
+  tasks: 
+    - name: validate team_to_delete
+      fail:
+        msg: "team name is not defined"
+      when:
+        - team_to_delete is not defined
+ 
+    - name: set fact organization if not defined 
+      set_fact:
+        organization: 'The Hartford Cloud Automation'
+      when: organization is not defined
+ 
+   #Get team id from team name 
+    - name: "get team id of {{ team_to_delete }} "
+      uri:
+        url: "{{ tower_api_host }}//api/v2/teams/?name={{ team_to_delete | urlencode }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: team_details
+ 
+    - name: set fact team content
+      set_fact:
+        team_details_content: "{{ team_details.content }}"
+ 
+    - name: set fact team id
+      set_fact:
+        team_id: "{{ team_details_content.results[0].id }}"
+ 
+    - name: Failed in deleteing team
+      fail:
+        msg: "couldn't get the details of mentioned team {{ team_to_delete }}"
+      when: team_id is not defined
+    # Fetch the current information
+    - name: get LDAP setting 
+      uri:
+        url: "{{ tower_api_host }}//api/v2/settings/ldap/"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: current_entries
+    - name: setfact the required load 
+      set_fact:
+        actual_entry: "{{ current_entries.json.AUTH_LDAP_TEAM_MAP | default([]) }}"
+ 
+    - name: setfact the required ldap group  
+      set_fact:
+        ldap_group: "{{ actual_entry[team_to_delete].users }}"
+      ignore_errors: true
+ 
+    - name: debug ldap_group
+      debug:
+        var: ldap_group
+      when: ldap_group is defined
+ 
+    - name: make api call to delete the team
+      uri:
+        url: "{{ tower_api_host }}//api/v2/teams/{{ team_id }}/"
+        method: DELETE
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 204
+        validate_certs: false
+        return_content: true   
+      register: delete_team
+      when: ldap_group is defined and team_to_delete in current_entries.json.AUTH_LDAP_TEAM_MAP
+# Maki API call to update the "AUTH_LDAP_ORGANIZATION_MAP":
+    - name: update LDAP organization map setting 
+      uri:
+        url: "{{ tower_api_host }}//api/v2/settings/ldap/"
+        method: PATCH
+        body_format: json
+        headers:
+          Content-Type: "application/json"
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        body: >
+          {{
+            {
+              "AUTH_LDAP_ORGANIZATION_MAP": {
+                organization:{
+                  "users": current_entries.json.AUTH_LDAP_ORGANIZATION_MAP[organization]['users'] | difference([ldap_group])
+                  }
+               }
+            }
+          }}
+        status_code: 200
+        validate_certs: false
+        return_content: true
+      when: ldap_group is defined and ldap_group in current_entries.json.AUTH_LDAP_ORGANIZATION_MAP[organization]['users']
+      register: result_org_map
+ 
+    - name: update LDAP team map setting 
+      uri:
+        url: "{{ tower_api_host }}//api/v2/settings/ldap/"
+        method: PATCH
+        body_format: json
+        headers:
+          Content-Type: "application/json"
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        body: >
+          {{
+            {
+              "AUTH_LDAP_TEAM_MAP": current_entries.json.AUTH_LDAP_TEAM_MAP | combine({
+              team_to_delete: omit
+            })           
+            }
+          }}
+        status_code: 200
+        validate_certs: false
+        return_content: true
+      when: ldap_group is defined and team_to_delete in current_entries.json.AUTH_LDAP_TEAM_MAP       
+      register: result_team_map
