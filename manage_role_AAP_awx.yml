@@ -1,0 +1,98 @@
+---
+- hosts: localhost
+  gather_facts: true
+  tasks:
+ 
+    - name: Check required inputs
+      fail:
+        msg: "Missing one or more vars:  team, role, resource_type, resource_name or action"
+      when:
+        - team is not defined
+        - role is not defined
+        - resource_type is not defined
+        - resource_name is not defined
+        - action is not define
+ 
+    - name: validate resource_type
+      fail:
+        msg: "resource_type is not project or job-template or inventory"
+      when:
+        - resource_type != "project" and resource_type != "inventory" and resource_type != "job-template"
+ 
+    - name: map variable for role
+      set_fact:
+        role_mappings:
+          admin: "Admin"
+          update: "Update"
+          use: "Use"
+          execute: "Execute"
+ 
+    - name: update role value if it is in smallcase 
+      set_fact: 
+        role_exact: "{{ role_mappings[role] if role in role_mappings else role  }}"
+ 
+    - name: set fact action type
+      set_fact: 
+        action_type: "present"
+      when: action == "grant"
+ 
+    - name: set fact action type
+      set_fact: 
+        action_type: "absent"
+      when: action == "revoke"
+ 
+    - name: debug action_type value
+      debug:
+        var: action_type   
+    - name: debug role_exact value
+      debug:
+        var: role_exact
+ 
+    - name: validate role based on resource type
+      fail:
+        msg: "The role: {{ role_exact }} is not allowed for resource type: {{ resource_type }}"
+      when: ( resource_type == "project" and ( role_exact != "Admin" and role_exact != "Update" and role_exact != "Use" )) or
+            ( resource_type == "inventory" and role_exact != "Use" ) or
+            ( resource_type == "job-template" and ( role_exact != "Execute" and role_exact != "Admin" ))
+ 
+    - name: assigning role for project
+      block:
+        - name: Add permissions to project
+          ansible.controller.role:
+            team: "{{ team }}"
+            role: "{{ role | lower }}"
+            state: "{{ action_type }}"
+            project: "{{ resource_name }}"
+            validate_certs: false
+          environment:
+            CONTROLLER_HOST: "{{ ansible_facts.env.AWX_HOST }}"
+            CONTROLLER_OAUTH_TOKEN: "{{ oauth_token_credential }}"
+      when: resource_type == "project"
+ 
+    - name: assigning role for job template 
+      block:
+        - name: Add permissions to job template
+          ansible.controller.role:
+            team: "{{ team }}"
+            role: "{{ role | lower }}"
+            state: "{{ action_type }}"
+            job_template: "{{ resource_name }}"
+            validate_certs: false
+          environment:
+            CONTROLLER_HOST: "{{ ansible_facts.env.AWX_HOST }}"
+            CONTROLLER_OAUTH_TOKEN: "{{ oauth_token_credential }}"
+      when: resource_type == "job-template"
+ 
+    - name: assigning role for inventory"
+      block:
+        - name: Add permissions to inventory 
+          ansible.controller.role:
+            team: "{{ team }}"
+            role: "{{ role | lower }}"
+            state: "{{ action_type }}"
+            inventory: "{{ resource_name }}"
+            validate_certs: false
+          environment:
+            CONTROLLER_HOST: "{{ ansible_facts.env.AWX_HOST }}"
+            CONTROLLER_OAUTH_TOKEN: "{{ oauth_token_credential }}"
+      when: resource_type == "inventory"
