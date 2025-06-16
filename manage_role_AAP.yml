@@ -1,0 +1,17 @@
+---
+- hosts: localhost
+  tasks:
+ 
+    - name: Check required inputs
+      fail:
+        msg: "Missing one or more vars:  team, role, resource_type, resource_name or action"
+      when:
+        - team is not defined
+        - role is not defined
+        - resource_type is not defined
+        - resource_name is not defined
+        - action is not defined
+ 
+    - name: Call manage_role.yml
+      include_role:
+        name: manage_roles
