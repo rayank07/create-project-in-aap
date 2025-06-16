@@ -1,0 +1,86 @@
+---
+- name: create project via template
+  hosts: localhost
+  gather_facts: no
+  connection: local
+  tasks:
+    - name: failure states
+      fail:
+        msg: "Missing one or more vars: github_org,github_repo,admin_team,create_team"
+      when:
+        - github_org is not defined
+        - github_repo is not defined
+        - admin_team is not defined
+        - create_team is not defined
+ 
+    - set_fact:
+        project_organization: 'The Hartford Cloud Automation'
+ 
+    - set_fact:
+        scm_type: 'git'
+ 
+    - set_fact:
+        scm_url: 'https://github.thehartford.com/{{ github_org }}/{{ github_repo }}.git'
+ 
+    - set_fact:
+        active_server: 'localhost'
+ 
+    - set_fact:
+        team_description: "The {{ admin_team }} project admin team"
+      when:
+        - team_description is not defined
+ 
+    - set_fact:
+        scm_update_on_launch: 'false'
+      when:
+        - scm_update_on_launch is not defined
+ 
+    - set_fact:
+        allow_override: 'false'
+      when:
+        - allow_override is not defined
+ 
+    - set_fact:
+        github_branch: 'master'
+      when:
+        - github_branch is not defined
+ 
+    - set_fact:
+        project_to_create: "{{ github_repo }}-{{ github_branch }}"
+      when:
+        - project_to_create is not defined
+ 
+    - set_fact:
+        project_description: "The {{ project_to_create }} project"
+      when:
+        - project_description is not defined
+ 
+    - name: create team
+      block:
+        - name: Call launch for {{ create_team_template }}
+          include_tasks: launch_create_team_template.yml
+          vars:
+            job_retries: 60
+            job_delay: 10 
+            lxvars: '"---\nldap_group: {{ ldap_group }}\nteam_to_create: {{ admin_team }}\nteam_description: {{ team_description }}\norganization: {{ project_organization }}\ntask_number: {{ task_number }}"'
+ 
+      when:
+        - admin_team is defined and create_team == 'true'
+ 
+ 
+    - name: Call create_project.yml
+      include_role:
+        name: create_project
+ 
+ 
+    - name: call manage role template 
+      block:
+        - name: Call launch for {{ manage_role_template }}
+          include_tasks: launch_manage_role_template.yml
+          vars:
+            job_retries: 60
+            job_delay: 10 
+            lxvars: '"---\naction: grant\nresource_name: {{ project_name }}\nresource_type: project\nrole: Admin\nteam: {{ admin_team }}\ntask_number: {{ task_number }}"'
+ 
+      when:
+        - admin_team is defined and create_team == 'false' and project_name is defined
