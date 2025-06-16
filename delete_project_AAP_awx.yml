@@ -1,0 +1,56 @@
+---
+- hosts: localhost
+  gather_facts: true
+  tasks:
+    #Get project id from project name 
+    - name: "get project id of {{ project_to_delete }} "
+      uri:
+        url: "{{ tower_api_host }}//api/v2/projects/?name={{ project_to_delete | urlencode }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: project_details
+ 
+    - name: set fact project content
+      set_fact:
+        project_details_content: "{{ project_details.content }}"
+ 
+    - name: set fact project id
+      set_fact:
+        project_id: "{{ project_details_content.results[0].id }}"
+ 
+    - name: debug project id
+      debug:
+        var: project_id
+ 
+# Before deleting a project check whether the project is associated with any templates 
+    - name: get job templates details 
+      uri:
+        url: "{{ tower_api_host }}//api/v2/job_templates/?project_id={{ project_id }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: job_templates_entries
+    - name: display number of template associate with project
+      debug:
+        var: job_templates_entries.json.count
+    - name: delete project in AAP 
+      ansible.controller.project:
+        name: "{{ project_to_delete }}"
+        state: absent
+        validate_certs: false
+      environment:
+        CONTROLLER_HOST: "{{ ansible_facts.env.AWX_HOST }}"
+        CONTROLLER_OAUTH_TOKEN: "{{ oauth_token_credential }}"
+      when: job_templates_entries.json.count | int == 0
+ 
+    - name: display templates asssociated with project 
+      fail:
+        msg: "Job template is associated with the project , please diassociated job template before deleting project"
+      when: job_templates_entries.json.count | int > 0
