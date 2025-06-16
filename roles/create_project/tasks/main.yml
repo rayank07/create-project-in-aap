@@ -1,0 +1,102 @@
+    - name: get organization id from organization name
+
+      uri:
+
+        url: "{{ tower_api_host }}//api/v2/organizations/?name={{ project_organization | urlencode }}"
+
+        method: GET
+
+        headers:
+
+          Authorization: "Bearer {{ oauth_token_credential }}"
+
+        status_code: 200
+
+        validate_certs: false
+
+        return_content: true   
+
+      register: organization_details
+ 
+    - name: set fact organization_content
+
+      set_fact:
+
+        organization_content: "{{ organization_details.content }}"
+ 
+    - name: set fact organization id
+
+      set_fact:
+
+        organization_id: "{{ organization_content.results[0].id }}"
+ 
+    - name: debug
+
+      debug:
+
+        var: organization_id
+ 
+    - name: create a project in AAP
+
+      uri:
+
+        url: "{{ tower_api_host }}//api/v2/projects/"
+
+        method: POST
+
+        body_format: json
+
+        headers:
+
+          Content-Type: "application/json"
+
+          Authorization: "Bearer {{ oauth_token_credential }}"
+
+        body: |
+
+          {
+
+            "name": "{{ project_to_create}}",
+
+            "description": "{{ project_description }}",
+
+            "scm_type": "{{ scm_type }}",
+
+            "scm_url": "{{ scm_url }}",
+
+            "scm_branch": "{{ github_branch }}",
+
+            "organization": "{{ organization_id }}",
+
+            "scm_update_on_launch": "{{ scm_update_on_launch }}",
+
+            "allow_override": "{{ allow_override }}",
+
+          }
+
+        status_code: 201
+
+        validate_certs: false
+
+        return_content: true
+
+      register: project_create_result
+ 
+    - name: debug
+
+      debug:
+
+        var: project_create_result
+
+    - name: set fact
+
+      set_fact:
+
+        project_name: "{{ project_create_result.json.name }}"
+
+    - name: debug project name
+
+      debug:
+
+        var: project_name
+ 
