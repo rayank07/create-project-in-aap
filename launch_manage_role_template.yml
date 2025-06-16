@@ -1,0 +1,70 @@
+---
+- set_fact:
+    default_body: '"limit": "{{ active_server | default("") }}"'
+ 
+- set_fact:
+    call_body: "{{ default_body }}"
+ 
+- set_fact:
+    xvars: '"extra_vars": {{ lxvars }}'
+ 
+- set_fact:
+    call_body: "{{ default_body }} , {{ xvars }}"
+  when:
+    lxvars is defined
+ 
+    
+- name: fire and forget job via API
+  uri:
+    url: "{{ tower_api_host }}/api/v2/workflow_job_templates/{{ manage_roles_template }}/launch/"
+    method: POST
+    body: '{ {{ call_body | default(default_body) }} }'
+    validate_certs: false
+    status_code: 201
+    return_content: true
+    body_format: json
+    headers:
+      Authorization: "Bearer {{ oauth_token_credential }}"
+  no_log: false
+  register: api_response
+ 
+- name: display launched job url
+  debug:
+    msg: "{{ tower_api_host }}/#/jobs/playbook/{{ api_response.json.id }}"
+ 
+- name: wait for the job
+  uri:
+    url: "{{ tower_api_host }}{{ api_response.json.url }}"
+    validate_certs: false
+    status_code: 200
+    return_content: true
+    body_format: "json"
+    headers:
+      Authorization: "Bearer {{ oauth_token_credential }}"
+  register: api_response_wait
+  until: >
+    api_response_wait.json.status == 'successful' or api_response_wait.json.status == 'failed' or 
+    api_response_wait.json.status == 'canceled'
+  retries: "{{ job_retries }}"
+  delay: "{{ job_delay }}"
+  delegate_to: localhost
+  become: false
+  tags: api_response
+ 
+- name: get the template output details 
+  uri:
+    url: "{{ tower_api_host }}{{ api_response.json.url }}"
+    validate_certs: false
+    status_code: 200
+    return_content: true
+    body_format: "json"
+    headers:
+      Authorization: "Bearer {{ oauth_token_credential }}"
+  register: api_response_output
+  delegate_to: localhost
+  become: false
+  tags: api_response_output
+ 
+- name: debug wait for job 
+  debug:
+    var: api_response_wait
