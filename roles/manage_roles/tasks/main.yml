@@ -1,0 +1,223 @@
+---
+- name: validate resource_type
+  fail:
+    msg: "resource_type is not project or job-template or inventory"
+  when:
+    - resource_type != "project" and resource_type != "inventory" and resource_type != "job-template"
+- name: map variable for role
+  set_fact:
+    role_mappings:
+      admin: "Admin"
+      update: "Update"
+      use: "Use"
+      execute: "Execute"
+ 
+ 
+- name: update role value if it is in smallcase 
+  set_fact: 
+    role_exact: "{{ role_mappings[role] if role in role_mappings else role  }}"
+- name: debug role_exact value
+  debug:
+    var: role_exact
+ 
+- name: validate role based on resource type
+  fail:
+    msg: "The role: {{ role }} is not allowed for resource type: {{ resource_type }}"
+  when: ( resource_type == "project" and ( role_exact != "Admin" and role_exact != "Update" and role_exact != "Use" )) or
+        ( resource_type == "inventory" and role_exact != "Use" ) or
+        ( resource_type == "job-template" and ( role_exact != "Execute" and role_exact != "Admin" ))
+ 
+- name: validate action
+  fail:
+    msg: "action is not grant or revoke"
+  when:
+    - action != "grant" and action != "revoke"
+ 
+- name: get project id
+  block:
+    - name: "get project id of {{ resource_name }} "
+      uri:
+        url: "{{ tower_api_host }}//api/v2/projects/?name={{ resource_name | urlencode }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: project_details
+ 
+    - name: set fact project content
+      set_fact:
+        project_details_content: "{{ project_details.content }}"
+ 
+    - name: set fact project id
+      set_fact:
+        project_id: "{{ project_details_content.results[0].id }}"
+ 
+    - name: debug
+      debug:
+        var: project_id
+ 
+    - name: "get role response of {{ resource_name }}  "
+      uri:
+        url: "{{ tower_api_host }}//api/v2/projects/{{ project_id }}//object_roles/"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: project_role_response
+ 
+    - name: get specific role id for a {{ role_exact }} role
+      set_fact:
+        role_id: "{{ item.id }}"
+      loop: "{{ project_role_response.json.results }}"
+      when: item.name == role_exact
+ 
+    - debug:
+        msg: " role id is {{ role_id }}"
+ 
+  when: resource_type == "project"
+ 
+- name: get template id
+  block:
+    - name: "get template id of {{ resource_name }} "
+      uri:
+        url: "{{ tower_api_host }}//api/v2/job_templates/?name={{ resource_name | urlencode }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: template_details
+ 
+    - name: set fact template_content
+      set_fact:
+        template_details_content: "{{ template_details.content }}"
+ 
+    - name: set fact template_id
+      set_fact:
+        template_id: "{{ template_details_content.results[0].id }}"
+ 
+    - name: debug
+      debug:
+        var: template_id
+ 
+    - name: "get role response of {{ resource_name }}  "
+      uri:
+        url: "{{ tower_api_host }}//api/v2/job_templates/{{ template_id }}//object_roles/"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: template_role_response
+ 
+    - name: get specific role id for a {{ role_exact }} role
+      set_fact:
+        role_id: "{{ item.id | to_json | int }}"
+      loop: "{{ template_role_response.json.results }}"
+      when: item.name == role_exact
+ 
+    - debug:
+        msg: 
+          - " role id is {{ role_id }}"
+          - "datatype is {{ role_id | type_debug }}"
+ 
+  when: resource_type == "job-template"
+ 
+- name: get inventory id
+  block:
+    - name: "get inventory id of {{ resource_name }} "
+      uri:
+        url: "{{ tower_api_host }}//api/v2/inventories/?name={{ resource_name | urlencode }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: inventory_details
+ 
+    - name: set fact inventory content
+      set_fact:
+        inventory_details_content: "{{ inventory_details.content }}"
+ 
+    - name: set fact inventory_id
+      set_fact:
+        inventory_id: "{{ inventory_details_content.results[0].id }}"
+ 
+    - name: debug inventory_id
+      debug:
+        var: inventory_id
+ 
+    - name: "get role response of {{ resource_name }}  "
+      uri:
+        url: "{{ tower_api_host }}//api/v2/inventories/{{ inventory_id }}//object_roles/"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: inventory_role_response
+ 
+    - name: get specific role id for a {{ role_exact }} role
+      set_fact:
+        role_id: "{{ item.id }}"
+      loop: "{{ inventory_role_response.json.results }}"
+      when: item.name == role_exact
+ 
+    - debug:
+        msg: " role id is {{ role_id }}"
+ 
+  when: resource_type == "inventory"
+ 
+# get team id from team_name 
+- name: "get team id  {{ team }} "
+  uri:
+    url: "{{ tower_api_host }}//api/v2/teams/?name={{ team | urlencode }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ oauth_token_credential }}"
+    status_code: 200
+    validate_certs: false
+    return_content: true   
+  register: team_details
+ 
+- name: set fact team content
+  set_fact:
+    team_details_content: "{{ team_details.content }}"
+ 
+- name: set fact inventory_id
+  set_fact:
+    team_id: "{{ team_details_content.results[0].id }}"
+ 
+- name: debug team_id
+  debug:
+    var: team_id
+#make API call to map specific role to team 
+- name: map role with team 
+  block:
+    - name: "map id of {{ resource_name }} "
+      uri:
+        url: "{{ tower_api_host }}/api/v2/teams/{{ team_id }}/roles/"
+        method: POST
+        body_format: json
+        headers:
+          Content-Type: "application/json"
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        body:
+          '{ "id": {{ role_id | int }} }'
+        status_code: 204
+        validate_certs: false
+        return_content: true
+      register: map_role_result
+ 
+    - name: debug map_role_result
+      debug:
+        var: map_role_result
+  when: role_id is defined
