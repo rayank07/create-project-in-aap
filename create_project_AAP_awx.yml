@@ -1,0 +1,169 @@
+---
+- name: create project via template
+  hosts: localhost
+  gather_facts: yes
+  connection: local
+  tasks: 
+    - name: failure states
+      fail:
+        msg: "Missing one or more vars: github_org,github_repo,admin_team,create_team"
+      when:
+        - github_org is not defined
+        - github_repo is not defined
+        - admin_team is not defined
+        - create_team is not defined
+ 
+    - set_fact:
+        project_to_create: "{{ github_repo }}-{{ github_branch }}"
+      when:
+        - project_to_create is not defined
+ 
+    - set_fact:
+        project_description: "The {{ project_to_create }} project"
+      when:
+        - project_description is not defined
+ 
+    - set_fact:
+        project_organization: 'The Hartford Cloud Automation'
+ 
+    - set_fact:
+        organization: 'The Hartford Cloud Automation'
+ 
+    - set_fact:
+        scm_url: 'https://github.thehartford.com/{{ github_org }}/{{ github_repo }}.git'
+ 
+    - set_fact:
+        github_branch: 'master'
+      when:
+        - github_branch is not defined
+ 
+    - set_fact:
+        scm_update_on_launch: 'false'
+      when:
+        - scm_update_on_launch is not defined
+ 
+    - set_fact:
+        allow_override: 'false'
+      when:
+        - allow_override is not defined
+ 
+    - set_fact:
+        active_server: 'localhost'
+ 
+    - set_fact:
+        team_description: "The {{ admin_team }} project admin team"
+      when:
+        - team_description is not defined
+    - name: get LDAP setting 
+      uri:
+        url: "{{ tower_api_host }}//api/v2/settings/ldap/"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: current_entries
+ 
+    - name: setfact the required load 
+      set_fact:
+        actual_entry: "{{ current_entries.json.AUTH_LDAP_TEAM_MAP | default([]) }}"
+    - name: debug actual_entry
+      debug:
+        var: actual_entry
+ 
+    - name: setfact the required ldap group  
+      set_fact:
+        ldap_group: "{{ actual_entry[admin_team].users }}"
+        team_check: "{{ ldap_group is defined }}"
+      ignore_errors: true
+    - name: debug ldap_group
+      debug:
+        msg: "team is present"
+      when: team_check is defined
+    - name: debug ldap_group
+      debug:
+        msg: "team is not present"
+      when: team_check is not defined
+ 
+ 
+    - name: Failed project and team creation
+      fail:
+        msg: "team creation is {{ create_team }} and team check is not defined "
+      when: create_team == 'false' and team_check is not defined
+    - name: create team
+      block:
+        - name: Call create team template id- {{ create_team_template }}
+          include_tasks: launch_create_team_template.yml
+          vars:
+            job_retries: 60
+            job_delay: 10 
+            lxvars: '"---\nldap_group: {{ ldap_group }}\nteam_to_create: {{ admin_team }}\nteam_description: {{ team_description }}\norganization: {{ project_organization }}\ntask_number: {{ task_number }}"'
+ 
+      when:
+        - admin_team is defined and create_team == 'true' and team_check is not defined
+ 
+# check project already exists
+    - name: "get project id of {{ project_to_create }} "
+      uri:
+        url: "{{ tower_api_host }}//api/v2/projects/?name={{ project_to_create | urlencode }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ oauth_token_credential }}"
+        status_code: 200
+        validate_certs: false
+        return_content: true   
+      register: project_details
+ 
+    - name: set fact project content
+      set_fact:
+        project_details_content: "{{ project_details.content }}"
+ 
+    - name: set fact project id
+      set_fact:
+        project_id: "{{ project_details_content.results[0].id }}"
+      when: project_details_content.results[0].id is defined
+ 
+    - name: Fail when project already exists
+      fail:
+        msg: "Project already exists - {{ project_to_create }}"
+      when: project_id is defined
+ 
+    - name: create project in AAP 
+      block:
+        - name: Add Project 
+          ansible.controller.project:
+            name: "{{ project_to_create }}"
+            description: "{{ project_description }}"
+            organization: "{{ project_organization }}"
+            scm_type: "git"
+            scm_branch: "{{ github_branch }}"
+            scm_url: "{{ scm_url }}"
+            scm_update_on_launch: "{{ scm_update_on_launch }}"
+            allow_override: "{{ allow_override }}"
+            state: present
+            validate_certs: false
+          register: project_create_result
+          environment:
+            CONTROLLER_HOST: "{{ ansible_facts.env.AWX_HOST }}"
+            CONTROLLER_OAUTH_TOKEN: "{{ oauth_token_credential }}"
+        - name: set fact project name
+          set_fact:
+            project_name: "{{ project_create_result.name }}"
+        - name: debug project name
+          debug:
+            var: project_name
+ 
+      when: project_id is not defined
+ 
+    - name: call manage role template 
+      block:
+        - name: Call manage role template id - {{ manage_roles_template }}
+          include_tasks: launch_manage_role_template.yml
+          vars:
+            job_retries: 60
+            job_delay: 10 
+            lxvars: '"---\naction: grant\nresource_name: {{ project_name }}\nresource_type: project\nrole: Admin\nteam: {{ admin_team }}\ntask_number: {{ task_number }}"'
+ 
+      when:
+        - admin_team is defined and team_check is defined and project_name is defined
